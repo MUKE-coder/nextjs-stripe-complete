@@ -1,0 +1,158 @@
+```
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  name      String?
+  orders    Order[]
+}
+
+model Product {
+  id       String    @id @default(uuid())
+  name     String
+  price    Float
+  image    String
+  sales    Sale[]
+}
+
+model Order {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  products  Product[] @relation("OrderProducts", references: [id])
+  createdAt DateTime  @default(now())
+}
+
+model Sale {
+  id        String    @id @default(uuid())
+  productId String
+  product   Product   @relation(fields: [productId], references: [id])
+  orderId   String
+  order     Order     @relation(fields: [orderId], references: [id])
+  quantity  Int
+  createdAt DateTime  @default(now())
+}
+
+model OrderProduct {
+  orderId   String
+  productId String
+
+  order     Order   @relation(fields: [orderId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@id([orderId, productId])
+}
+
+
+```
+
+//API
+
+```
+import { NextRequest, NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+const prisma = new PrismaClient();
+
+async function getActiveProducts() {
+  const stripeProducts = await stripe.products.list();
+  const activeProducts = stripeProducts.data.filter(
+    (item: any) => item.active === true
+  );
+  return activeProducts;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { products, userId } = await request.json();
+    const checkoutProducts: any[] = products;
+
+    // Creating Stripe Non-existing Stripe Products
+    let activeProducts = await getActiveProducts();
+    try {
+      for (const product of checkoutProducts) {
+        const stripeProduct = activeProducts?.find(
+          (stripeProduct: any) =>
+            stripeProduct?.name?.toLowerCase() === product?.name?.toLowerCase()
+        );
+
+        if (stripeProduct === undefined) {
+          const unitAmount = Math.round(product.price * 100);
+
+          const prod = await stripe.products.create({
+            name: product.name,
+            default_price_data: {
+              unit_amount: unitAmount,
+              currency: 'usd',
+            },
+            images: [product.image],
+          });
+          console.log(`Product created: ${prod.name}`);
+        } else {
+          console.log('Product already exists');
+        }
+      }
+    } catch (error) {
+      console.error('Error creating products:', error);
+    }
+
+    // Creating Checkout Stripe Items
+    activeProducts = await getActiveProducts();
+    let checkoutStripeProducts: any = [];
+    for (const product of checkoutProducts) {
+      const stripeProduct = activeProducts?.find(
+        (stripeProduct: any) =>
+          stripeProduct?.name?.toLowerCase() === product?.name?.toLowerCase()
+      );
+
+      if (stripeProduct) {
+        checkoutStripeProducts.push({
+          price: stripeProduct?.default_price,
+          quantity: product.qty,
+        });
+      }
+    }
+
+    // Creating Checkout Session
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    console.log(checkoutStripeProducts);
+    const session = await stripe.checkout.sessions.create({
+      line_items: checkoutStripeProducts,
+      mode: 'payment',
+      success_url: `${baseUrl}/success`,
+      cancel_url: `${baseUrl}/cancel`,
+    });
+    console.log(session?.url);
+
+    // Creating Order and Sales in the Database
+    if (session?.url) {
+      const order = await prisma.order.create({
+        data: {
+          userId,
+          products: {
+            connect: checkoutProducts.map((product: any) => ({ id: product.id })),
+          },
+        },
+      });
+
+      for (const product of checkoutProducts) {
+        await prisma.sale.create({
+          data: {
+            productId: product.id,
+            orderId: order.id,
+            quantity: product.qty,
+          },
+        });
+      }
+    }
+
+    return NextResponse.json({
+      url: session?.url,
+    });
+  } catch (error) {
+    console.log(error);
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
+  }
+}
+
+```

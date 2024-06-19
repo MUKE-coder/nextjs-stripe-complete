@@ -12,10 +12,15 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAppDispatch, useAppSelector } from "@/store/hooks/hooks";
-import { removeProductFromCart } from "@/store/slices/cartSlice";
+import {
+  removeAllProductsFromCart,
+  removeProductFromCart,
+} from "@/store/slices/cartSlice";
+import { url } from "inspector";
 import {
   Headset,
   HelpCircle,
+  Loader2,
   LogOut,
   Mail,
   MessageSquareMore,
@@ -31,8 +36,41 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export function CartMenu() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  async function checkout() {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    setLoading(true);
+    try {
+      const response = await fetch(`${baseUrl}/api/checkout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ products: cartItems }),
+      });
+
+      const data = await response.json();
+      console.log(data);
+
+      if (data?.url) {
+        // console.log(response.url);
+        const url = data?.url;
+        setLoading(false);
+        console.log(url);
+        dispatch(removeAllProductsFromCart());
+        window.location.href = url;
+        // router.replace(url);
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      setLoading(false);
+    }
+  }
   const cartItems = useAppSelector((state) => state.cart.cartItems);
   console.log(cartItems);
   const dispatch = useAppDispatch();
@@ -111,16 +149,23 @@ export function CartMenu() {
             </div>
           </div>
           <SheetFooter>
-            <SheetClose asChild>
-              <Button variant={"outline"} type="submit">
-                Continue Shopping
+            {!loading && (
+              <SheetClose asChild>
+                <Button variant={"outline"} type="submit">
+                  Continue Shopping
+                </Button>
+              </SheetClose>
+            )}
+            {loading ? (
+              <Button disabled>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Processing Please wait
               </Button>
-            </SheetClose>
-            <Button asChild>
-              <Link href="/checkout">
+            ) : (
+              <Button onClick={checkout}>
                 <span>Proceed to Checkout</span>
-              </Link>
-            </Button>
+              </Button>
+            )}
           </SheetFooter>
         </SheetContent>
       ) : (

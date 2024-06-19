@@ -4,6 +4,13 @@ interface Category {
   name: string;
   image: string;
 }
+export interface CheckoutProductProps {
+  id: number;
+  name: string;
+  price: number;
+  image: string;
+  qty: number;
+}
 
 // Interface for the Product
 export interface Product {
